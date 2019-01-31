@@ -1143,50 +1143,70 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     private fun updateTrainingRoutine(dataPoints: Int) {
         if (dataPoints % mSampleRate == 0 && mRunTrainingBool) {
             val second = dataPoints / mSampleRate
-            val mSDS = 10
-            var eventSecondCountdown = 0
-            if (second in 0..(mSDS - 1)) {
-                eventSecondCountdown = mSDS - second
-                updateTrainingPrompt("Relax hand")
-                updateTrainingPromptColor(Color.GREEN)
-                mEMGClass = 0.0
-            } else if (second >= mSDS && second < 2 * mSDS) {
-                eventSecondCountdown = 2 * mSDS - second
-                updateTrainingPrompt("Close Hand")
-                mEMGClass = 1.0
-            } else if (second >= 2 * mSDS && second < 3 * mSDS) {
-                eventSecondCountdown = 3 * mSDS - second
-                updateTrainingPrompt("Relax hand")
-                updateTrainingPromptColor(Color.GREEN)
-                mEMGClass = 0.0
-            } else if (second >= 3 * mSDS && second < 4 * mSDS) {
-                eventSecondCountdown = 4 * mSDS - second
-                updateTrainingPrompt("Rotate Hand")
-                mEMGClass = 2.0
-            } else if (second >= 4 * mSDS && second < 5 * mSDS) {
-                eventSecondCountdown = 5 * mSDS - second
-                updateTrainingPrompt("Relax hand")
-                updateTrainingPromptColor(Color.GREEN)
-                mEMGClass = 0.0
-            } else if (second >= 5 * mSDS && second < 6 * mSDS) {
-                eventSecondCountdown = 6 * mSDS - second
-                updateTrainingPrompt("Forwards & Backwards")
-                updateTrainingPromptColor(Color.GREEN)
-                mEMGClass = 3.0
-            } else if (second >= 6 * mSDS && second < 7 * mSDS) {
-                eventSecondCountdown = 7 * mSDS - second
-                updateTrainingPrompt("Stop!")
-                updateTrainingPromptColor(Color.RED)
-                mEMGClass = 0.0
-            } else if (second >= 7 * mSDS && second < 8 * mSDS) {
-                eventSecondCountdown = 8 * mSDS - second
-                updateTrainingPrompt("Stop!")
-                updateTrainingPromptColor(Color.RED)
-                updateTrainingView(false)
-                disconnectAllBLE()
-            }
-            if (eventSecondCountdown == mSDS) {
-                mMediaBeep.start()
+            val secondsBetweenAction = 5
+            Log.d(TAG, "mSDS:" + secondsBetweenAction.toString() + " second: " + second.toString())
+            if (second % secondsBetweenAction == 0) mMediaBeep.start()
+            when {
+                (second < secondsBetweenAction) -> {
+                    updateTrainingPromptColor(Color.GREEN)
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == secondsBetweenAction) -> {
+                    mEMGClass = 1.0
+                    updateTrainingPrompt("Close Hand")
+                }
+                (second == 2 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 3 * secondsBetweenAction) -> {
+                    mEMGClass = 2.0
+                    updateTrainingPrompt("Close Pinky")
+                }
+                (second == 4 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 5 * secondsBetweenAction) -> {
+                    mEMGClass = 3.0
+                    updateTrainingPrompt("Close Ring")
+                }
+                (second == 6 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 7 * secondsBetweenAction) -> {
+                    mEMGClass = 4.0
+                    updateTrainingPrompt("Close Middle")
+                }
+                (second == 8 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 9 * secondsBetweenAction) -> {
+                    mEMGClass = 5.0
+                    updateTrainingPrompt("Close Index")
+                }
+                (second == 10 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 11 * secondsBetweenAction) -> {
+                    mEMGClass = 6.0
+                    updateTrainingPrompt("Close Thumb")
+                }
+                (second == 12 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Open Hand")
+                }
+                (second == 13 * secondsBetweenAction) -> {
+                    mEMGClass = 0.0
+                    updateTrainingPrompt("Stop!")
+                    updateTrainingPromptColor(Color.RED)
+                    disconnectAllBLE()
+                    exportData()
+                }
             }
         }
     }
