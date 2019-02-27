@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:ap="http://schemas.android.com/apk/res-auto"
+              android:orientation="vertical"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#FFFFFF">
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/button_export"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Export"
+            android:textColor="#000000" />
+
+        <ToggleButton
+            android:id="@+id/toggleButtonCh1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="ToggleButton" />
+
+        <ToggleButton
+            android:id="@+id/toggleButtonCh2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="ToggleButton" />
+
+        <ToggleButton
+            android:id="@+id/toggleButtonCh3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="ToggleButton" />
+
+        <TextView
+            android:id="@+id/dataRate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DR" />
+
+        <Button
+            android:id="@+id/buttonHandControl"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="BT_Conn"
+            android:textColor="#000000" />
+
+        <TextView
+            android:id="@+id/classifierOutput"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="TextView" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/trainingInstructions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="TrainingInstructions"
+        android:textAlignment="center"
+        android:textSize="36sp"
+        android:visibility="visible" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <com.androidplot.xy.XYPlot
+            android:id="@+id/emgTimeDomainXYPlot01"
+            style="@style/APFullScreenGraph.Light.Minimalist"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:layout_weight="1"
+            ap:renderMode="use_background_thread" />
+
+        <com.androidplot.xy.XYPlot
+            android:id="@+id/emgTimeDomainXYPlot02"
+            style="@style/APFullScreenGraph.Light.Minimalist"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:layout_weight="1"
+            ap:renderMode="use_background_thread" />
+
+        <com.androidplot.xy.XYPlot
+            android:id="@+id/emgTimeDomainXYPlot03"
+            style="@style/APFullScreenGraph.Light.Minimalist"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:layout_weight="1"
+            ap:renderMode="use_background_thread" />
+
+    </LinearLayout>
+
+</LinearLayout>

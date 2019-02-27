@@ -2,20 +2,20 @@
 // Academic License - for use in teaching, academic research, and meeting
 // course requirements at degree granting institutions only.  Not for
 // government, commercial, or other organizational use.
-// File: emg_hpf_upscale_types.h
+// File: ctrainingRoutineKNN2_types.h
 //
 // MATLAB Coder version            : 3.3
-// C/C++ source code generated on  : 26-Jan-2018 12:25:07
+// C/C++ source code generated on  : 13-Sep-2017 16:32:45
 //
-#ifndef EMG_HPF_UPSCALE_TYPES_H
-#define EMG_HPF_UPSCALE_TYPES_H
+#ifndef CTRAININGROUTINEKNN2_TYPES_H
+#define CTRAININGROUTINEKNN2_TYPES_H
 
 // Include Files
 #include "rtwtypes.h"
 #endif
 
 //
-// File trailer for emg_hpf_upscale_types.h
+// File trailer for ctrainingRoutineKNN2_types.h
 //
 // [EOF]
 //

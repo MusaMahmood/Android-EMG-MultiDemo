@@ -24,6 +24,8 @@ import android.widget.TextView
 import android.widget.Toast
 import android.widget.ToggleButton
 import com.androidplot.util.Redrawer
+import com.google.common.primitives.Doubles
+import com.opencsv.CSVWriter
 import com.parrot.arsdk.arcommands.ARCOMMANDS_JUMPINGSUMO_MEDIARECORDEVENT_PICTUREEVENTCHANGED_ERROR_ENUM
 import com.parrot.arsdk.arcommands.ARCOMMANDS_MINIDRONE_MEDIARECORDEVENT_PICTUREEVENTCHANGED_ERROR_ENUM
 import com.parrot.arsdk.arcommands.ARCOMMANDS_MINIDRONE_PILOTINGSTATE_FLYINGSTATECHANGED_STATE_ENUM
@@ -126,6 +128,10 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     private val mJSDroneSpeedLR: Int = 20
     private val mJSDroneSpeedFWREV: Int = 20
 
+    //File Save Variables:
+    private var mEMGClass = 0.0
+    private val mEMGClassArray = DoubleArray(30000)
+
     private val timeStamp: String
         get() = SimpleDateFormat("yyyy.MM.dd_HH.mm.ss", Locale.US).format(Date())
 
@@ -143,10 +149,12 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         deviceMacAddresses = intent.getStringArrayExtra(MainActivity.INTENT_DEVICES_KEY)
         val deviceDisplayNames = intent.getStringArrayExtra(MainActivity.INTENT_DEVICES_NAMES)
         val stimulusSeconds = intent.getStringArrayExtra(MainActivity.INTENT_DELAY_VALUE_SECONDS)
-        if (intent.extras != null)
+        if (intent.extras != null) {
             mRunTrainingBool = intent.extras!!.getBoolean(MainActivity.INTENT_TRAIN_BOOLEAN)
-        else
+            Log.e(TAG, "Train Activity (true/false): $mRunTrainingBool")
+        } else {
             Log.e(TAG, "ERROR: intent.getExtras = null")
+        }
         mScaleFactor = Integer.valueOf(stimulusSeconds[0])!!.toDouble()
         mDeviceName = deviceDisplayNames[0]
         mDeviceAddress = deviceMacAddresses!![0]
@@ -862,15 +870,15 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 
                     if (service.getCharacteristic(AppConstant.CHAR_EEG_CH1_SIGNAL) != null) {
                         mActBle!!.setCharacteristicNotifications(gatt, service.getCharacteristic(AppConstant.CHAR_EEG_CH1_SIGNAL), true)
-                        if (mCh1 == null) mCh1 = DataChannel(false, mMSBFirst, 4 * mSampleRate)
+                        if (mCh1 == null) mCh1 = DataChannel(false, mMSBFirst, 120 * mSampleRate)
                     }
                     if (service.getCharacteristic(AppConstant.CHAR_EEG_CH2_SIGNAL) != null) {
                         mActBle!!.setCharacteristicNotifications(gatt, service.getCharacteristic(AppConstant.CHAR_EEG_CH2_SIGNAL), true)
-                        if (mCh2 == null) mCh2 = DataChannel(false, mMSBFirst, 4 * mSampleRate)
+                        if (mCh2 == null) mCh2 = DataChannel(false, mMSBFirst, 120 * mSampleRate)
                     }
                     if (service.getCharacteristic(AppConstant.CHAR_EEG_CH3_SIGNAL) != null) {
                         mActBle!!.setCharacteristicNotifications(gatt, service.getCharacteristic(AppConstant.CHAR_EEG_CH3_SIGNAL), true)
-                        if (mCh3 == null) mCh3 = DataChannel(false, mMSBFirst, 4 * mSampleRate)
+                        if (mCh3 == null) mCh3 = DataChannel(false, mMSBFirst, 120 * mSampleRate)
                     }
                     if (service.getCharacteristic(AppConstant.CHAR_EEG_CH4_SIGNAL) != null)
                         mActBle!!.setCharacteristicNotifications(gatt, service.getCharacteristic(AppConstant.CHAR_EEG_CH4_SIGNAL), true)
@@ -1030,10 +1038,6 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                     zAccelerationTextView.text = zAccStr
                 }
             }
-            // Pass buffer to classifier:
-            mMPUClass = mNativeInterface.jclassifyPosition(mAccX!!.classificationBuffer,
-                    mAccY!!.classificationBuffer, mAccZ!!.classificationBuffer,
-                    mZAccMaxThreshold, mZAccMinThreshold).toInt()
         }
 
         if (mCh1!!.chEnabled && mCh2!!.chEnabled && mCh3!!.chEnabled) {
@@ -1053,48 +1057,60 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 
     fun Double.format(digits: Int) = java.lang.String.format("%.${digits}f", this)!!
 
-    private fun classifyEMG() {
-        if (mTFRunModel) {
-            val outputScores = FloatArray(4)
-            val end = mCh1!!.classificationBuffer.size - 1 //E.g. if size = 500, end = 499
-            val from = end - mTensorflowWindowSize
-            val ch1Input = Arrays.copyOfRange(mCh1!!.classificationBuffer, from, end)
-            val rescaledInput = mNativeInterface.jfiltRescale(ch1Input, mScaleFactor) // mTensorflowWindowSize
-            Log.i(TAG, "onCharacteristicChanged: TF_PRECALL_TIME, N#" + mNumberOfClassifierCalls.toString())
-            mTFInferenceInterface?.feed("keep_prob", floatArrayOf(1f))
-            mTFInferenceInterface?.feed(INPUT_DATA_FEED, rescaledInput, mTensorflowWindowSize.toLong())
-            mTFInferenceInterface?.run(arrayOf(OUTPUT_DATA_FEED))
-            mTFInferenceInterface?.fetch(OUTPUT_DATA_FEED, outputScores)
-            val yTF = DataChannel.getIndexOfLargest(outputScores)
-            Log.i(TAG, "CALL#" + mNumberOfClassifierCalls.toString() + ":\n" +
-                    "TF outputScores: " + Arrays.toString(outputScores))
+    lateinit var mKNNParams: DoubleArray
 
-            System.arraycopy(mClassificationBuffer, 1, mClassificationBuffer, 0, 4)
-            mClassificationBuffer[4] = yTF
-            var output = 0
-            if (mMiniDrone != null) {
-                if (mMPUClass == 0) {
-                    if (allValuesSame(mClassificationBuffer)) {
-                        output = yTF
-                    }
-                } else {
-                    output = mMPUClass
-                }
-            } else {
-                output = yTF
-            }
-            sendDroneCommand(output)
-            executeWheelchairCommand(output)
-            Log.e(TAG, "Drone Class Output: $output")
-            mNumberOfClassifierCalls++
-            val s = Arrays.toString(mClassificationBuffer) + " - MPU: [$mMPUClass]"
-            val outputStr = "Output: [ $output ]"
-            runOnUiThread {
-                mYfitTextView!!.text = s
-                mEMGClassText?.text = outputStr
-            }
-        }
+    private val mTrainEMGThread = Runnable {
+        val dataConcat = Doubles.concat(mCh1!!.classificationBuffer, mCh2!!.classificationBuffer, mCh3!!.classificationBuffer, mEMGClassArray)
+        // Assert Array Size.
+        Log.e(TAG, "dataConcat.size: ${dataConcat.size}") // Should be 120k
+        // Run feature extraction:
+        mKNNParams = mNativeInterface.jTrainingRoutineKNN2(dataConcat)
+        Log.e(TAG, "mKNNPararms.size: ${mKNNParams.size}")
+        Log.e(TAG, "mKNNPararms: ${Arrays.toString(mKNNParams)}")
     }
+
+//    private fun classifyEMG() {
+//        if (mTFRunModel) {
+//            val outputScores = FloatArray(4)
+//            val end = mCh1!!.classificationBuffer.size - 1 //E.g. if size = 500, end = 499
+//            val from = end - mTensorflowWindowSize
+//            val ch1Input = Arrays.copyOfRange(mCh1!!.classificationBuffer, from, end)
+//            val rescaledInput = mNativeInterface.jfiltRescale(ch1Input, mScaleFactor) // mTensorflowWindowSize
+//            Log.i(TAG, "onCharacteristicChanged: TF_PRECALL_TIME, N#" + mNumberOfClassifierCalls.toString())
+//            mTFInferenceInterface?.feed("keep_prob", floatArrayOf(1f))
+//            mTFInferenceInterface?.feed(INPUT_DATA_FEED, rescaledInput, mTensorflowWindowSize.toLong())
+//            mTFInferenceInterface?.run(arrayOf(OUTPUT_DATA_FEED))
+//            mTFInferenceInterface?.fetch(OUTPUT_DATA_FEED, outputScores)
+//            val yTF = DataChannel.getIndexOfLargest(outputScores)
+//            Log.i(TAG, "CALL#" + mNumberOfClassifierCalls.toString() + ":\n" +
+//                    "TF outputScores: " + Arrays.toString(outputScores))
+//
+//            System.arraycopy(mClassificationBuffer, 1, mClassificationBuffer, 0, 4)
+//            mClassificationBuffer[4] = yTF
+//            var output = 0
+//            if (mMiniDrone != null) {
+//                if (mMPUClass == 0) {
+//                    if (allValuesSame(mClassificationBuffer)) {
+//                        output = yTF
+//                    }
+//                } else {
+//                    output = mMPUClass
+//                }
+//            } else {
+//                output = yTF
+//            }
+//            sendDroneCommand(output)
+//            executeWheelchairCommand(output)
+//            Log.e(TAG, "Drone Class Output: $output")
+//            mNumberOfClassifierCalls++
+//            val s = Arrays.toString(mClassificationBuffer) + " - MPU: [$mMPUClass]"
+//            val outputStr = "Output: [ $output ]"
+//            runOnUiThread {
+//                mYfitTextView!!.text = s
+//                mEMGClassText?.text = outputStr
+//            }
+//        }
+//    }
 
     private fun allValuesSame(y: IntArray): Boolean {
         return y.map { it == y[0] }.find { !it } == null
@@ -1143,78 +1159,84 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     private fun updateTrainingRoutine(dataPoints: Int) {
         if (dataPoints % mSampleRate == 0 && mRunTrainingBool) {
             val second = dataPoints / mSampleRate
-            val secondsBetweenAction = 5
-            Log.d(TAG, "mSDS:" + secondsBetweenAction.toString() + " second: " + second.toString())
+            val secondsBetweenAction = 10
+//            var countDownValue = 0
+            Log.d(TAG, "mSDS:$secondsBetweenAction second: $second")
             if (second % secondsBetweenAction == 0) mMediaBeep.start()
             when {
-                (second < secondsBetweenAction) -> {
+                (second in 0 until 10) -> {
                     updateTrainingPromptColor(Color.GREEN)
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == secondsBetweenAction) -> {
+                (second in 10 until 20) -> {
                     mEMGClass = 1.0
-                    updateTrainingPrompt("Close Hand")
+                    updateTrainingPrompt("Close Hand", Color.RED)
                 }
-                (second == 2 * secondsBetweenAction) -> {
+                (second in 20 until 30) -> {
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == 3 * secondsBetweenAction) -> {
+                (second in 30 until 40) -> {
                     mEMGClass = 2.0
-                    updateTrainingPrompt("Close Pinky")
+                    updateTrainingPrompt("Close Pinky", Color.RED)
                 }
-                (second == 4 * secondsBetweenAction) -> {
+                (second in 40 until 50) -> {
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == 5 * secondsBetweenAction) -> {
+                (second in 50 until 60) -> {
                     mEMGClass = 3.0
-                    updateTrainingPrompt("Close Ring")
+                    updateTrainingPrompt("Close Ring", Color.RED)
                 }
-                (second == 6 * secondsBetweenAction) -> {
+                (second in 60 until 70) -> {
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == 7 * secondsBetweenAction) -> {
+                (second in 70 until 80) -> {
                     mEMGClass = 4.0
-                    updateTrainingPrompt("Close Middle")
+                    updateTrainingPrompt("Close Middle", Color.RED)
                 }
-                (second == 8 * secondsBetweenAction) -> {
+                (second in 80 until 90) -> {
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == 9 * secondsBetweenAction) -> {
+                (second in 90 until 100) -> {
                     mEMGClass = 5.0
-                    updateTrainingPrompt("Close Index")
+                    updateTrainingPrompt("Close Index", Color.RED)
                 }
-                (second == 10 * secondsBetweenAction) -> {
+                (second in 100 until 110) -> {
                     mEMGClass = 0.0
                     updateTrainingPrompt("Open Hand")
                 }
-                (second == 11 * secondsBetweenAction) -> {
+                (second in 110 until 120) -> {
                     mEMGClass = 6.0
-                    updateTrainingPrompt("Close Thumb")
+                    updateTrainingPrompt("Close Thumb", Color.RED)
                 }
-                (second == 12 * secondsBetweenAction) -> {
-                    mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
-                }
-                (second == 13 * secondsBetweenAction) -> {
-                    mEMGClass = 0.0
+                (second in 120 until 130) -> {
+                    // TODO: Run training EXACTLY @ 120 seconds elapsed.
                     updateTrainingPrompt("Stop!")
                     updateTrainingPromptColor(Color.RED)
-                    disconnectAllBLE()
-                    exportData()
+                    mEMGClass = 0.0
                 }
+            }
+        }
+
+        if (dataPoints < 30000) {
+            mEMGClassArray[dataPoints] = mEMGClass
+            if (dataPoints == 29999) {
+                // Do this once
+                val trainThread = Thread(mTrainEMGThread)
+                trainThread.start()
             }
         }
     }
 
-    private fun updateTrainingPrompt(prompt: String) {
+    private fun updateTrainingPrompt(prompt: String, color: Int = Color.GREEN) {
         runOnUiThread {
             if (mRunTrainingBool) {
                 mTrainingInstructions?.text = prompt
+                mTrainingInstructions?.setTextColor(color)
             }
         }
     }
@@ -1242,7 +1264,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
             val datarate2 = (points2 / 3).toDouble()
             points2 = 0
             mLastTime2 = mCurrentTime
-            Log.e(" DataRate 2(MPU):", datarate2.toString() + " Bytes/s")
+            Log.e(" DataRate 2(MPU):", "$datarate2 Bytes/s")
         }
     }
 
@@ -1253,9 +1275,9 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
             dataRate = (points / 5).toDouble()
             points = 0
             mLastTime = mCurrentTime
-            Log.e(" DataRate:", dataRate.toString() + " Bytes/s")
+            Log.e(" DataRate:", "$dataRate Bytes/s")
             runOnUiThread {
-                val s = dataRate.toString() + " Bytes/s"
+                val s = "$dataRate Bytes/s"
                 mDataRate!!.text = s
             }
         }

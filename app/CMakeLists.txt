@@ -23,23 +23,19 @@ add_library( # Sets the name of the library.
               ssvep-lib
 
               # Sets the library as a shared library.
-              SHARED
-              # Provides a relative path to your source file(s).
+            SHARED
+            # Provides a relative path to your source file(s).
 
-                # Main C++ Data Processing Files
-                src/main/cpp/tf_psd_rescale_w256.cpp
-                src/main/cpp/tf_psd_rescale_w384.cpp
-                src/main/cpp/tf_psd_rescale_w512.cpp
-                src/main/cpp/emg_hpf_upscale.cpp
-                src/main/cpp/getRescaleFactor.cpp
-                src/main/cpp/classifyPosition.cpp
+            # Main C++ Data Processing Files
+            src/main/cpp/classifyArmEMG4.cpp
+            src/main/cpp/ctrainingRoutineKNN2.cpp
 
-                # Executor
-                src/main/cpp/jniExecutor.cpp
+            # Executor
+            src/main/cpp/jniExecutor.cpp
 
-                src/main/cpp/rt_nonfinite.cpp
-                src/main/cpp/rtGetInf.cpp
-                src/main/cpp/rtGetNaN.cpp )
+            src/main/cpp/rt_nonfinite.cpp
+            src/main/cpp/rtGetInf.cpp
+            src/main/cpp/rtGetNaN.cpp )
 
 # The following line allows for auto-including header files in the listed directory:
 include_directories(src/main/cpp/)

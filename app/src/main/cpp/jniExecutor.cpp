@@ -3,12 +3,8 @@
 //
 
 #include "rt_nonfinite.h"
-#include "tf_psd_rescale_w256.h"
-#include "tf_psd_rescale_w384.h"
-#include "tf_psd_rescale_w512.h"
-#include "emg_hpf_upscale.h"
-#include "getRescaleFactor.h"
-#include "classifyPosition.h"
+#include "ctrainingRoutineKNN2.h"
+#include "classifyArmEMG4.h"
 
 /*Additional Includes*/
 #include <jni.h>
@@ -17,166 +13,37 @@
 #define  LOG_TAG "jniExecutor-cpp"
 #define  LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-static void rescale_minmax_floats(const float X[], float Y[], const int size)
-{
-    int ixstart;
-    float mtmp;
-    int ix;
-    boolean_T exitg1;
-    float b_mtmp;
-    ixstart = 1;
-    mtmp = X[0];
-    if (rtIsNaN(X[0])) {
-        ix = 2;
-        exitg1 = false;
-        while ((!exitg1) && (ix < size + 1)) {
-            ixstart = ix;
-            if (!rtIsNaN(X[ix - 1])) {
-                mtmp = X[ix - 1];
-                exitg1 = true;
-            } else {
-                ix++;
-            }
-        }
-    }
-
-    if (ixstart < size) {
-        while (ixstart + 1 < size + 1) {
-            if (X[ixstart] < mtmp) {
-                mtmp = X[ixstart];
-            }
-            ixstart++;
-        }
-    }
-
-    ixstart = 1;
-    b_mtmp = X[0];
-    if (rtIsNaN(X[0])) {
-        ix = 2;
-        exitg1 = false;
-        while ((!exitg1) && (ix < size + 1)) {
-            ixstart = ix;
-            if (!rtIsNaN(X[ix - 1])) {
-                b_mtmp = X[ix - 1];
-                exitg1 = true;
-            } else {
-                ix++;
-            }
-        }
-    }
-
-    if (ixstart < size) {
-        while (ixstart + 1 < size+1) {
-            if (X[ixstart] > b_mtmp) {
-                b_mtmp = X[ixstart];
-            }
-
-            ixstart++;
-        }
-    }
-
-    b_mtmp -= mtmp;
-    for (ixstart = 0; ixstart < size; ixstart++) {
-        Y[ixstart] = (X[ixstart] - mtmp) / b_mtmp;
-    }
-}
-
 extern "C" {
 JNIEXPORT jdouble JNICALL
 /**
  *
  * @param env
  * @param jobject1
- * @return array of frequencies (Hz) corresponding to a raw input signal.
+ * @param allData 750x3 vector of data
+ * @param params KNN features 1x9920
+ * @param LastY
+ * @return
  */
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jclassifyPosition(
-        JNIEnv *env, jobject jobject1, jdoubleArray x, jdoubleArray y, jdoubleArray z,
-        jdouble max_threshold, jdouble min_threshold) {
-    jdouble *X = env->GetDoubleArrayElements(x, NULL);
-    jdouble *Y = env->GetDoubleArrayElements(y, NULL);
-    jdouble *Z = env->GetDoubleArrayElements(z, NULL);
-    return classifyPosition(X, Y, Z, max_threshold, min_threshold);
-}
-}
-
-extern "C" {
-JNIEXPORT jdouble JNICALL
-/**
- *
- * @param env
- * @param jobject1
- * @return array of frequencies (Hz) corresponding to a raw input signal.
- */
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jgetPeak2PeakVoltage(
-        JNIEnv *env, jobject jobject1, jdoubleArray x) {
-    jdouble *X = env->GetDoubleArrayElements(x, NULL);
-    return getPeak2PeakVoltage(X);
-}
-}
-
-extern "C" {
-JNIEXPORT jfloatArray JNICALL
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jfiltRescale(
-        JNIEnv *env, jobject jobject1, jdoubleArray data, jdouble scale_factor) {
-    jdouble *X = env->GetDoubleArrayElements(data, NULL);
-    if (X == NULL) LOGE("ERROR - C_ARRAY IS NULL");
-    float Y[128];
-    jfloatArray m_result = env->NewFloatArray(128);
-    emg_hpf_upscale(X, Y, scale_factor);
-    env->SetFloatArrayRegion(m_result, 0, 128, Y);
-    return m_result;
-}
-}
-
-extern "C" {
-JNIEXPORT jfloatArray JNICALL
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jrescaleMinmax(
-        JNIEnv *env, jobject jobject1, jfloatArray data, jint size) {
-    jfloat *X = env->GetFloatArrayElements(data, NULL);
-    if (X == NULL) LOGE("ERROR - C_ARRAY IS NULL");
-    float Y[size];
-    jfloatArray m_result = env->NewFloatArray(size);
-    rescale_minmax_floats(X, Y, size);
-    env->SetFloatArrayRegion(m_result, 0, size, Y);
-    return m_result;
-}
-}
-
-extern "C" {
-JNIEXPORT jfloatArray JNICALL
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jTFPSDExtraction(
-        JNIEnv *env, jobject jobject1, jdoubleArray ch1_2_data, jint length) {
-    jdouble *X = env->GetDoubleArrayElements(ch1_2_data, NULL); if (X == NULL) LOGE("ERROR - C_ARRAY IS NULL");
-    jfloatArray m_result = env->NewFloatArray(length);
-    float Y[length]; //length/2*2=Divide by two for normal length, but we are looking at 2 vectors.
-    if (length == 256)
-        tf_psd_rescale_w256(X, Y);
-    else if (length == 384)
-        tf_psd_rescale_w384(X, Y);
-    else if (length == 512)
-        tf_psd_rescale_w512(X, Y);
-    env->SetFloatArrayRegion(m_result, 0, length, Y);
-    return m_result;
+Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jClassifyUsingKNNv4(
+        JNIEnv *env, jobject jobject1, jdoubleArray allData, jdoubleArray params, jdouble knn) {
+    jdouble *X1 = env->GetDoubleArrayElements(allData, nullptr);
+    jdouble *PARAMS = env->GetDoubleArrayElements(params, nullptr);
+    if (X1 == nullptr) LOGE("ERROR - C_ARRAY IS NULL");
+    return classifyArmEMG4(X1, PARAMS, knn);
 }
 }
 
 extern "C" {
 JNIEXPORT jdoubleArray JNICALL
-/**
- *
- * @param env
- * @param jobject1
- * @return array of frequencies (Hz) corresponding to a raw input signal.
- */
-Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jLoadfPSD(
-        JNIEnv *env, jobject jobject1, jint sampleRate, jint win_length) {
-    double fPSD[win_length/2];
-    for (int i = 0; i < win_length/2; i++) {
-        fPSD[i] = (double) i * (double) sampleRate / (double) win_length;
-    }
-    jdoubleArray m_result = env->NewDoubleArray(win_length/2);
-    env->SetDoubleArrayRegion(m_result, 0, win_length/2, fPSD);
-    return m_result;
+Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jTrainingRoutineKNN2(JNIEnv *env, jobject obj, jdoubleArray allData) {
+    jdouble *X = env->GetDoubleArrayElements(allData, nullptr);
+    if (X== nullptr) LOGE("ERROR - C_ARRAY");
+    double KNN_PARAMS[9920];
+    //TODO: INSERT ANALYSIS FUNCTION HERE
+    ctrainingRoutineKNN2(X,KNN_PARAMS);
+    jdoubleArray mReturnArray = env->NewDoubleArray(9920);
+    env->SetDoubleArrayRegion(mReturnArray, 0, 9920, &KNN_PARAMS[0]);
+    return mReturnArray;
 }
 }
 
@@ -185,7 +52,7 @@ JNIEXPORT jint JNICALL
 Java_com_yeolabgt_mahmoodms_emgmultidemo_NativeInterfaceClass_jmainInitialization(
         JNIEnv *env, jobject obj, jboolean terminate) {
     if (!(bool) terminate) {
-        emg_hpf_upscale_initialize();
+        ctrainingRoutineKNN2_initialize();
         return 0;
     } else {
         return -1;
