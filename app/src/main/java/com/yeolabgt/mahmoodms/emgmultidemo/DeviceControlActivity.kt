@@ -13,7 +13,6 @@ import android.graphics.drawable.ColorDrawable
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.support.v4.app.NavUtils
 import android.support.v4.content.FileProvider
@@ -25,7 +24,6 @@ import android.widget.Toast
 import android.widget.ToggleButton
 import com.androidplot.util.Redrawer
 import com.google.common.primitives.Doubles
-import com.opencsv.CSVWriter
 import com.parrot.arsdk.arcommands.ARCOMMANDS_JUMPINGSUMO_MEDIARECORDEVENT_PICTUREEVENTCHANGED_ERROR_ENUM
 import com.parrot.arsdk.arcommands.ARCOMMANDS_MINIDRONE_MEDIARECORDEVENT_PICTUREEVENTCHANGED_ERROR_ENUM
 import com.parrot.arsdk.arcommands.ARCOMMANDS_MINIDRONE_PILOTINGSTATE_FLYINGSTATECHANGED_STATE_ENUM
@@ -38,7 +36,6 @@ import com.yeolabgt.mahmoodms.emgmultidemo.ParrotDrone.JSDrone
 import com.yeolabgt.mahmoodms.emgmultidemo.ParrotDrone.MiniDrone
 import kotlinx.android.synthetic.main.activit_dev_ctrl_alt.*
 import org.tensorflow.contrib.android.TensorFlowInferenceInterface
-import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
@@ -128,12 +125,31 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     private val mJSDroneSpeedLR: Int = 20
     private val mJSDroneSpeedFWREV: Int = 20
 
-    //File Save Variables:
+    // EMG Training and Classification:
     private var mEMGClass = 0.0
     private val mEMGClassArray = DoubleArray(30000)
+    private lateinit var mKNNParams: DoubleArray
+    private var mClassifierReady = false
+    private val yFitArray = DoubleArray(5)
 
     private val timeStamp: String
         get() = SimpleDateFormat("yyyy.MM.dd_HH.mm.ss", Locale.US).format(Date())
+
+    private fun Double.format(digits: Int) = java.lang.String.format("%.${digits}f", this)!!
+
+    private fun allValuesSame(y: IntArray): Boolean {
+        return y.map { it == y[0] }.find { !it } == null
+    }
+
+    private fun lastThreeMatches(yfitarray: DoubleArray): Boolean {
+        var b0 = false
+        var b1 = false
+        if (yfitarray[4] != 0.0) {
+            b0 = yfitarray[4] == yfitarray[3]
+            b1 = yfitarray[3] == yfitarray[2]
+        }
+        return b0 && b1
+    }
 
     // Native Interface Function Handler:
     private val mNativeInterface = NativeInterfaceClass()
@@ -301,26 +317,26 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 //        initializeTensorflowInterface()
     }
 
-    private fun initializeTensorflowInterface() {
-        val customModelPath = Environment.getExternalStorageDirectory().absolutePath + "/Download/tensorflow_assets/"
-        mTensorflowWindowSize = 128
-        val modelPath = customModelPath + "opt_emg_2cnn_1ch_wlen" + mTensorflowWindowSize.toString() + ".pb"
-        Log.d(TAG, "customModel Wlen128: exists? " + File(modelPath).exists().toString())
-        when {
-            File(modelPath).exists() -> {
-                mTFInferenceInterface = TensorFlowInferenceInterface(assets, modelPath)
-                //Reset counter:
-                mNumberOfClassifierCalls = 1
-                mTFRunModel = true
-                Log.i(TAG, "Tensorflow: customModel loaded")
-                Toast.makeText(applicationContext, "Tensorflow: Model Loaded", Toast.LENGTH_LONG).show()
-            }
-            else -> { // No model found, continuing with original (reset switch)
-                mTFRunModel = false
-                Toast.makeText(applicationContext, "No TF Model Found!", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
+//    private fun initializeTensorflowInterface() {
+//        val customModelPath = Environment.getExternalStorageDirectory().absolutePath + "/Download/tensorflow_assets/"
+//        mTensorflowWindowSize = 128
+//        val modelPath = customModelPath + "opt_emg_2cnn_1ch_wlen" + mTensorflowWindowSize.toString() + ".pb"
+//        Log.d(TAG, "customModel Wlen128: exists? " + File(modelPath).exists().toString())
+//        when {
+//            File(modelPath).exists() -> {
+//                mTFInferenceInterface = TensorFlowInferenceInterface(assets, modelPath)
+//                //Reset counter:
+//                mNumberOfClassifierCalls = 1
+//                mTFRunModel = true
+//                Log.i(TAG, "Tensorflow: customModel loaded")
+//                Toast.makeText(applicationContext, "Tensorflow: Model Loaded", Toast.LENGTH_LONG).show()
+//            }
+//            else -> { // No model found, continuing with original (reset switch)
+//                mTFRunModel = false
+//                Toast.makeText(applicationContext, "No TF Model Found!", Toast.LENGTH_LONG).show()
+//            }
+//        }
+//    }
 
     private fun disconnectDrone(): Boolean {
         if (mMiniDrone != null) {
@@ -403,7 +419,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
             }
         }
         if (mLedWheelchairControlService != null && mWheelchairControl) {
-            Log.e(TAG, "SendingCommand: " + command.toString())
+            Log.e(TAG, "SendingCommand: $command")
             Log.e(TAG, "SendingCommand (byte): " + DataChannel.byteArrayToHexString(bytes))
             mActBle!!.writeCharacteristic(mBluetoothGattArray[mWheelchairGattIndex]!!, mLedWheelchairControlService!!.getCharacteristic(AppConstant.CHAR_WHEELCHAIR_CONTROL), bytes)
         }
@@ -972,16 +988,10 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 if (mCh1!!.packetCounter.toInt() == mPacketBuffer) {
                     addToGraphBuffer(mCh1!!, mGraphAdapterCh1, true)
                     //TODO: Update Training Routine
-                    /*if (mNumberPackets % 10 == 0) {
-                        classifyEMG()
+                    if (mNumberPackets % 10 == 0 && mClassifierReady) {
+                        val mClassifyThread = Thread(mClassifyEMGThread)
+                        mClassifyThread.start()
                     }
-                    if (mNumberPackets % 20 == 0) { //every ~0.48 seconds
-                        val p2p = mNativeInterface.jgetPeak2PeakVoltage(mCh1!!.classificationBuffer)
-                        val s = " - Vp2p: ${(p2p * 1000.0).format(2)} mV"
-                        runOnUiThread {
-                            p2pVTextView.text = s
-                        }
-                    }*/
                 }
             }
         }
@@ -1055,9 +1065,45 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         }
     }
 
-    fun Double.format(digits: Int) = java.lang.String.format("%.${digits}f", this)!!
-
-    lateinit var mKNNParams: DoubleArray
+    private fun processClassifiedData(Y: Double) {
+        //Shift backwards:
+        System.arraycopy(yFitArray, 1, yFitArray, 0, 4)
+        //Add to end;
+        yFitArray[4] = Y
+        //Analyze:
+        Log.e(TAG, " YfitArray: " + Arrays.toString(yFitArray))
+        val checkLastThreeMatches = lastThreeMatches(yFitArray)
+        if (checkLastThreeMatches) {
+            //Get value:
+            Log.e(TAG, "Found fit: " + yFitArray[4].toString())
+            val s = "[$Y]"
+            runOnUiThread { mYfitTextView!!.text = s }
+            // For Controlling Hand. Some commands have to be altered because the classes don't match the commands.
+            // TODO: run BT Hand
+//            if (mConnectedThread != null) {
+//                if (Y != 0.0) {
+//                    val command: Int
+//                    if (Y == 2.0) {
+//                        command = 1
+//                    } else if (Y == 1.0) {
+//                        command = 2
+//                    } else
+//                        command = Y.toInt()
+//                    mConnectedThread.write(command)
+//                }
+//            }
+        } else {
+            val b = (yFitArray[0] == 0.0 && yFitArray[1] == 0.0 && yFitArray[2] == 0.0
+                    && yFitArray[3] == 0.0 && yFitArray[4] == 0.0)
+            if (b) {
+                val s = "[$Y]"
+                runOnUiThread { mYfitTextView!!.text = s }
+                // TODO: run BT Hand
+//                if (mConnectedThread != null)
+//                    mConnectedThread.write(1)
+            }
+        }
+    }
 
     private val mTrainEMGThread = Runnable {
         val dataConcat = Doubles.concat(mCh1!!.classificationBuffer, mCh2!!.classificationBuffer, mCh3!!.classificationBuffer, mEMGClassArray)
@@ -1065,8 +1111,20 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         Log.e(TAG, "dataConcat.size: ${dataConcat.size}") // Should be 120k
         // Run feature extraction:
         mKNNParams = mNativeInterface.jTrainingRoutineKNN2(dataConcat)
+        mClassifierReady = true
         Log.e(TAG, "mKNNPararms.size: ${mKNNParams.size}")
-        Log.e(TAG, "mKNNPararms: ${Arrays.toString(mKNNParams)}")
+    }
+
+    private val mClassifyEMGThread = Runnable {
+        val arrayCh1 = DoubleArray(750)
+        System.arraycopy(mCh1!!.classificationBuffer, 29249, arrayCh1, 0, 750)
+        val arrayCh2 = DoubleArray(750)
+        System.arraycopy(mCh2!!.classificationBuffer, 29249, arrayCh2, 0, 750)
+        val arrayCh3 = DoubleArray(750)
+        System.arraycopy(mCh3!!.classificationBuffer, 29249, arrayCh3, 0, 750)
+        val concatAllChannels = Doubles.concat(arrayCh1, arrayCh2, arrayCh3)
+        val yOutput = mNativeInterface.jClassifyUsingKNNv4(concatAllChannels, mKNNParams, 3.0)
+        processClassifiedData(yOutput)
     }
 
 //    private fun classifyEMG() {
@@ -1112,10 +1170,6 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 //        }
 //    }
 
-    private fun allValuesSame(y: IntArray): Boolean {
-        return y.map { it == y[0] }.find { !it } == null
-    }
-
     private fun addToGraphBuffer(dataChannel: DataChannel, graphAdapter: GraphAdapter?, updateTrainingRoutine: Boolean) {
         if (mFilterData && dataChannel.totalDataPointsReceived > 1000) {
             graphAdapter!!.clearPlot()
@@ -1160,64 +1214,77 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         if (dataPoints % mSampleRate == 0 && mRunTrainingBool) {
             val second = dataPoints / mSampleRate
             val secondsBetweenAction = 10
-//            var countDownValue = 0
-            Log.d(TAG, "mSDS:$secondsBetweenAction second: $second")
+            val countDownValue: Int
             if (second % secondsBetweenAction == 0) mMediaBeep.start()
             when {
                 (second in 0 until 10) -> {
+                    countDownValue = 10 - second;
                     updateTrainingPromptColor(Color.GREEN)
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("Relax Hand - Countdown to First Event: " + countDownValue + "s\n Next up: Close Hand")
                 }
                 (second in 10 until 20) -> {
+                    countDownValue = 20 - second;
                     mEMGClass = 1.0
-                    updateTrainingPrompt("Close Hand", Color.RED)
+                    updateTrainingPrompt("[1] Close Hand and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 20 until 30) -> {
+                    countDownValue = 30 - second;
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Pinky")
                 }
                 (second in 30 until 40) -> {
+                    countDownValue = 40 - second;
                     mEMGClass = 2.0
-                    updateTrainingPrompt("Close Pinky", Color.RED)
+                    updateTrainingPrompt("[7] Close Pinky and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 40 until 50) -> {
+                    countDownValue = 50 - second;
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Ring")
                 }
                 (second in 50 until 60) -> {
+                    countDownValue = 60 - second;
                     mEMGClass = 3.0
-                    updateTrainingPrompt("Close Ring", Color.RED)
+                    updateTrainingPrompt("[6] Close Ring and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 60 until 70) -> {
+                    countDownValue = 70 - second;
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Middle")
                 }
                 (second in 70 until 80) -> {
+                    countDownValue = 80 - second;
                     mEMGClass = 4.0
-                    updateTrainingPrompt("Close Middle", Color.RED)
+                    updateTrainingPrompt("[5] Close Middle and Hold " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 80 until 90) -> {
+                    countDownValue = 90 - second;
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue.toString() + "s\n Next up: Close Index")
                 }
                 (second in 90 until 100) -> {
+                    countDownValue = 100 - second;
                     mEMGClass = 5.0
-                    updateTrainingPrompt("Close Index", Color.RED)
+                    updateTrainingPrompt("[4] Close Index and Hold " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 100 until 110) -> {
+                    countDownValue = 110 - second;
                     mEMGClass = 0.0
-                    updateTrainingPrompt("Open Hand")
+                    updateTrainingPrompt("[0] Relax Hand and Remain for " + (countDownValue) + "s\n Next up: Close Thumb")
                 }
                 (second in 110 until 120) -> {
+                    countDownValue = 120 - second;
                     mEMGClass = 6.0
-                    updateTrainingPrompt("Close Thumb", Color.RED)
+                    updateTrainingPrompt("[3] Close Thumb and Hold " + (countDownValue) + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 120 until 130) -> {
                     // TODO: Run training EXACTLY @ 120 seconds elapsed.
                     updateTrainingPrompt("Stop!")
                     updateTrainingPromptColor(Color.RED)
+                    updateTrainingView(false)
                     mEMGClass = 0.0
+                    mRunTrainingBool = false
                 }
             }
         }

@@ -41,7 +41,7 @@ import java.util.ArrayList
 
 class MainActivity : Activity() {
     private var mScanning: Boolean = false
-    private var mRunTraining = false
+    private var mRunTraining = true
     private var mHandler: Handler? = null
     private var mBluetoothAdapter: BluetoothAdapter? = null
     private var scannedDeviceAdapter: ScannedDeviceAdapter? = null

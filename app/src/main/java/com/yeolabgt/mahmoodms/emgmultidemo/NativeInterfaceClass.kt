@@ -12,6 +12,8 @@ class NativeInterfaceClass {
     external fun jmainInitialization(b: Boolean): Int
     @Throws(IllegalArgumentException::class)
     external fun jTrainingRoutineKNN2(data: DoubleArray): DoubleArray
+    @Throws(IllegalArgumentException::class)
+    external fun jClassifyUsingKNNv4(data: DoubleArray, kparams: DoubleArray, k: Double): Double
 
     companion object {
         init {
