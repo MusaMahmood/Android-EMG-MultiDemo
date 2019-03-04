@@ -1,5 +1,6 @@
 package com.yeolabgt.mahmoodms.emgmultidemo
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ProgressDialog
 import android.bluetooth.*
@@ -12,6 +13,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.support.v4.app.NavUtils
@@ -154,6 +156,16 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     // Native Interface Function Handler:
     private val mNativeInterface = NativeInterfaceClass()
 
+    //Bluetooth Classic - For Robotic Hand
+    private var btAdapter: BluetoothAdapter? = null
+    private var btSocket: BluetoothSocket? = null
+
+    private lateinit var mConnectedThread: ConnectedThread
+    private val sb = StringBuilder()
+    private var flag = 0
+    //Bluetooth Classic - For Robotic Hand
+//    var mHandler = Handler()
+
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activit_dev_ctrl_alt)
@@ -257,6 +269,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 //                    mMiniDrone?.setYaw(50.toByte())
                     sendDroneCommand(2)
                     executeWheelchairCommand(3)
+                    processClassifiedData(0.0)
                 }
 
                 MotionEvent.ACTION_UP -> {
@@ -275,6 +288,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
                     sendDroneCommand(3)
+                    processClassifiedData(1.0)
                 }
 
                 MotionEvent.ACTION_UP -> {
@@ -310,33 +324,89 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                     mConnectDroneButton?.text = s
                 }
             }
-            Log.d(TAG, "onClick: mDroneConnectionState: " + mDroneConnectionState.toString())
+            Log.d(TAG, "onClick: mDroneConnectionState: $mDroneConnectionState")
         }
         mARService = intent.getParcelableExtra(MainActivity.EXTRA_DRONE_SERVICE)
-        //TODO: Reintialize new model:
-//        initializeTensorflowInterface()
-    }
-
-//    private fun initializeTensorflowInterface() {
-//        val customModelPath = Environment.getExternalStorageDirectory().absolutePath + "/Download/tensorflow_assets/"
-//        mTensorflowWindowSize = 128
-//        val modelPath = customModelPath + "opt_emg_2cnn_1ch_wlen" + mTensorflowWindowSize.toString() + ".pb"
-//        Log.d(TAG, "customModel Wlen128: exists? " + File(modelPath).exists().toString())
-//        when {
-//            File(modelPath).exists() -> {
-//                mTFInferenceInterface = TensorFlowInferenceInterface(assets, modelPath)
-//                //Reset counter:
-//                mNumberOfClassifierCalls = 1
-//                mTFRunModel = true
-//                Log.i(TAG, "Tensorflow: customModel loaded")
-//                Toast.makeText(applicationContext, "Tensorflow: Model Loaded", Toast.LENGTH_LONG).show()
-//            }
-//            else -> { // No model found, continuing with original (reset switch)
-//                mTFRunModel = false
-//                Toast.makeText(applicationContext, "No TF Model Found!", Toast.LENGTH_LONG).show()
+        //Attempt to connect to BT Hand Automatically
+//        btAdapter = BluetoothAdapter.getDefaultAdapter()       // get Bluetooth adapter
+//        checkBTState()
+//        mHandler = object : Handler() {
+//            override fun handleMessage(msg: android.os.Message) {
+//                when (msg.what) {
+//                    RECIEVE_MESSAGE -> {
+//                        val readBuf = msg.obj as ByteArray
+//                        val strIncom = String(readBuf, 0, msg.arg1)
+//                        sb.append(strIncom)
+//                        val endOfLineIndex = sb.indexOf("\r\n")
+//                        if (endOfLineIndex > 0) {
+//                            val sbprint = sb.substring(0, endOfLineIndex)
+//                            sb.delete(0, sb.length)
+//                            flag++
+//                            Log.i(TAG, "flag: " + flag.toString() + "Sbprint: " + sbprint)
+//                        }
+//                    }
+//                }
 //            }
 //        }
-//    }
+//        connectToClassicBTHand()
+    }
+
+    private fun checkBTState() {
+        // Check for Bluetooth support and then check to make sure it is turned on
+        // Emulator doesn't support Bluetooth and will return null
+        if (btAdapter == null) {
+            Log.e(TAG, "Fatal Error: " + "Bluetooth not support")
+        } else {
+            if (btAdapter!!.isEnabled) {
+                Log.d(TAG, "...Bluetooth ON...")
+            } else {
+                //Prompt user to turn on Bluetooth
+                val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                startActivityForResult(enableBtIntent, 1)
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun createBluetoothSocket(device: BluetoothDevice): BluetoothSocket {
+        try {
+            val m = device.javaClass.getMethod("createInsecureRfcommSocketToServiceRecord", UUID::class.java)
+            return m.invoke(device, MY_UUID) as BluetoothSocket
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not create Insecure RFComm Connection", e)
+        }
+
+        return device.createRfcommSocketToServiceRecord(MY_UUID)
+    }
+
+    private fun connectToClassicBTHand() {
+        val device = btAdapter!!.getRemoteDevice(address)
+        try {
+            btSocket = createBluetoothSocket(device)
+        } catch (e: IOException) {
+            Log.e(TAG, "socketCreate fail" + e.message)
+        }
+
+        btAdapter!!.cancelDiscovery()
+        Log.d(TAG, "...Connecting...")
+        try {
+            btSocket!!.connect()
+            Log.d(TAG, "....Connection ok...")
+        } catch (e: IOException) {
+            try {
+                btSocket!!.close()
+            } catch (e2: IOException) {
+                Log.e(TAG, "In onResume() and unable to close socket during connection failure" + e2.message + ".")
+            }
+
+        }
+
+        // Create a data stream so we can talk to server.
+        Log.d(TAG, "...Create Socket...")
+
+        mConnectedThread = ConnectedThread(btSocket)
+        mConnectedThread.start()
+    }
 
     private fun disconnectDrone(): Boolean {
         if (mMiniDrone != null) {
@@ -579,7 +649,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 btDeviceName.contains("500") -> 500
                 else -> 250
             }
-            mPacketBuffer = mSampleRate / 250
+//            mPacketBuffer = mSampleRate / 250
             Log.e(TAG, "mSampleRate: " + mSampleRate + "Hz")
             if (!mGraphInitializedBoolean) setupGraph()
 
@@ -677,6 +747,13 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         stopMonitoringRssiValue()
         mNativeInterface.jmainInitialization(true) //Just a technicality, doesn't actually do anything
         super.onDestroy()
+        if (btSocket != null) {
+            try {
+                btSocket!!.close()
+            } catch (e2: IOException) {
+                Log.e(TAG, "In onPause() and failed to close socket." + e2.message + ".")
+            }
+        }
     }
 
     private fun disconnectAllBLE() {
@@ -954,7 +1031,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         if (AppConstant.CHAR_EEG_CONFIG == characteristic.uuid) {
             if (characteristic.value != null) {
                 val readValue = characteristic.value
-                Log.e(TAG, "onCharacteriticChanged: \n" +
+                Log.e(TAG, "onCharacteristicChanged: \n" +
                         "CHAR_EEG_CONFIG: " + DataChannel.byteArrayToHexString(readValue))
                 when (readValue[0] and 0x0F.toByte()) {
                     0x06.toByte() -> mSampleRate = 250
@@ -965,7 +1042,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 }
                 //RESET mCH1 & mCH2:
                 mCh1?.classificationBufferSize = 4 * mSampleRate
-                Log.e(TAG, "Updated Sample Rate: " + mSampleRate.toString())
+                Log.e(TAG, "Updated Sample Rate: $mSampleRate")
             }
         }
 
@@ -988,10 +1065,10 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 if (mCh1!!.packetCounter.toInt() == mPacketBuffer) {
                     addToGraphBuffer(mCh1!!, mGraphAdapterCh1, true)
                     //TODO: Update Training Routine
-                    if (mNumberPackets % 10 == 0 && mClassifierReady) {
-                        val mClassifyThread = Thread(mClassifyEMGThread)
-                        mClassifyThread.start()
-                    }
+//                    if (mNumberPackets % 10 == 0 && mClassifierReady) {
+//                        val mClassifyThread = Thread(mClassifyEMGThread)
+//                        mClassifyThread.start()
+//                    }
                 }
             }
         }
@@ -1080,18 +1157,16 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
             runOnUiThread { mYfitTextView!!.text = s }
             // For Controlling Hand. Some commands have to be altered because the classes don't match the commands.
             // TODO: run BT Hand
-//            if (mConnectedThread != null) {
-//                if (Y != 0.0) {
-//                    val command: Int
-//                    if (Y == 2.0) {
-//                        command = 1
-//                    } else if (Y == 1.0) {
-//                        command = 2
-//                    } else
-//                        command = Y.toInt()
-//                    mConnectedThread.write(command)
-//                }
-//            }
+            if (Y != 0.0) {
+                val command: Int
+                if (Y == 2.0) {
+                    command = 1
+                } else if (Y == 1.0) {
+                    command = 2
+                } else
+                    command = Y.toInt()
+                mConnectedThread.write(command)
+            }
         } else {
             val b = (yFitArray[0] == 0.0 && yFitArray[1] == 0.0 && yFitArray[2] == 0.0
                     && yFitArray[3] == 0.0 && yFitArray[4] == 0.0)
@@ -1099,8 +1174,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
                 val s = "[$Y]"
                 runOnUiThread { mYfitTextView!!.text = s }
                 // TODO: run BT Hand
-//                if (mConnectedThread != null)
-//                    mConnectedThread.write(1)
+                mConnectedThread.write(1)
             }
         }
     }
@@ -1218,63 +1292,63 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
             if (second % secondsBetweenAction == 0) mMediaBeep.start()
             when {
                 (second in 0 until 10) -> {
-                    countDownValue = 10 - second;
+                    countDownValue = 10 - second
                     updateTrainingPromptColor(Color.GREEN)
                     mEMGClass = 0.0
                     updateTrainingPrompt("Relax Hand - Countdown to First Event: " + countDownValue + "s\n Next up: Close Hand")
                 }
                 (second in 10 until 20) -> {
-                    countDownValue = 20 - second;
+                    countDownValue = 20 - second
                     mEMGClass = 1.0
                     updateTrainingPrompt("[1] Close Hand and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 20 until 30) -> {
-                    countDownValue = 30 - second;
+                    countDownValue = 30 - second
                     mEMGClass = 0.0
                     updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Pinky")
                 }
                 (second in 30 until 40) -> {
-                    countDownValue = 40 - second;
+                    countDownValue = 40 - second
                     mEMGClass = 2.0
                     updateTrainingPrompt("[7] Close Pinky and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 40 until 50) -> {
-                    countDownValue = 50 - second;
+                    countDownValue = 50 - second
                     mEMGClass = 0.0
                     updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Ring")
                 }
                 (second in 50 until 60) -> {
-                    countDownValue = 60 - second;
+                    countDownValue = 60 - second
                     mEMGClass = 3.0
                     updateTrainingPrompt("[6] Close Ring and Hold for " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 60 until 70) -> {
-                    countDownValue = 70 - second;
+                    countDownValue = 70 - second
                     mEMGClass = 0.0
                     updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue + "s\n Next up: Close Middle")
                 }
                 (second in 70 until 80) -> {
-                    countDownValue = 80 - second;
+                    countDownValue = 80 - second
                     mEMGClass = 4.0
                     updateTrainingPrompt("[5] Close Middle and Hold " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 80 until 90) -> {
-                    countDownValue = 90 - second;
+                    countDownValue = 90 - second
                     mEMGClass = 0.0
                     updateTrainingPrompt("[0] Relax Hand and Remain for " + countDownValue.toString() + "s\n Next up: Close Index")
                 }
                 (second in 90 until 100) -> {
-                    countDownValue = 100 - second;
+                    countDownValue = 100 - second
                     mEMGClass = 5.0
                     updateTrainingPrompt("[4] Close Index and Hold " + countDownValue + "s\n Next up: Relax Hand", Color.RED)
                 }
                 (second in 100 until 110) -> {
-                    countDownValue = 110 - second;
+                    countDownValue = 110 - second
                     mEMGClass = 0.0
                     updateTrainingPrompt("[0] Relax Hand and Remain for " + (countDownValue) + "s\n Next up: Close Thumb")
                 }
                 (second in 110 until 120) -> {
-                    countDownValue = 120 - second;
+                    countDownValue = 120 - second
                     mEMGClass = 6.0
                     updateTrainingPrompt("[3] Close Thumb and Hold " + (countDownValue) + "s\n Next up: Relax Hand", Color.RED)
                 }
@@ -1538,11 +1612,11 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         }
 
         override fun configureDecoder(codec: ARControllerCodec) {
-            //            mVideoView.configureDecoder(codec);
+            //            mVideoView.configureDecoder(codec)
         }
 
         override fun onFrameReceived(frame: ARFrame) {
-            //            mVideoView.displayFrame(frame);
+            //            mVideoView.displayFrame(frame)
         }
 
         override fun onMatchingMediasFound(nbMedias: Int) {
@@ -1628,11 +1702,11 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
     }
 
     companion object {
-        val HZ = "0 Hz"
+        const val RECIEVE_MESSAGE = 1        // Status  for Handler
+        const val HZ = "0 Hz"
         private val TAG = DeviceControlActivity::class.java.simpleName
         var mRedrawer: Redrawer? = null
         internal var mMPU: DataChannel? = null
-        var mMPUClass = 0
         var mZAccValue = 1.0
         var mZAccMaxThreshold = 0.8
         var mZAccMinThreshold = 0.4
@@ -1650,10 +1724,7 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
         //Save Data File
         private var mPrimarySaveDataFile: SaveDataFile? = null
         private var mSaveFileMPU: SaveDataFile? = null
-        private var mTimestampIdxMPU = 0
         //Tensorflow CONSTANTS:
-        val INPUT_DATA_FEED = "input"
-        val OUTPUT_DATA_FEED = "output"
         // ADS1299 Register Configs
         val ADS1299_DEFAULT_BYTE_CONFIG = byteArrayOf(
                 0x96.toByte(), 0xD0.toByte(), 0xEC.toByte(), 0x00.toByte(), //CONFIG1-3, LOFF
@@ -1665,6 +1736,15 @@ class DeviceControlActivity : Activity(), ActBle.ActBleListener {
 
         //Note for companion object: JNI call must include Companion in call: e.g. package_class_Companion_function(...).
         //TODO: Still does not work when I try to call from the companion object.
+
+        // SPP UUID service
+        val MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")!!
+
+        // MAC-address of Bluetooth module (you must edit this line to change)
+        const val address = "30:14:12:17:21:88"
+        @JvmField
+        var mHandler = Handler()
+
         init {
             System.loadLibrary("ssvep-lib")
         }
